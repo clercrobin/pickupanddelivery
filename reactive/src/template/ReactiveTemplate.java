@@ -18,27 +18,22 @@ import logist.topology.Topology.City;
 
 public class ReactiveTemplate implements ReactiveBehavior {
 
-	private Random random;
-	private double pPickup;
+
 	private int numActions;
 	private Agent myAgent;
 	private int numberCities;
 	private double [] maxNeighbor;
 	private City [] bestNeighbor;
-	private int [] idBestNeighbor;
 
-	public double compute_cost(City origin, City destination) {
-		List<City> path = origin.pathTo(destination);
-		double result = 0;
-		City last = origin;
-		for (City next: path
-			 ) {
-			result = result + last.distanceTo(next);
-			last = next;
+	private double d(double[] V, double[] V_) {
+		// Return dinf(V, V_)
+		double d = 0;
+		for(int i = 0; i < V.length; ++i) {
+			if(Math.abs(V[i] - V_[i]) > d)
+				d = Math.abs(V[i] - V_[i]);
 		}
-
-		return result;
-
+		System.out.println(d);
+		return d;
 	}
 
 	@Override
@@ -49,30 +44,15 @@ public class ReactiveTemplate implements ReactiveBehavior {
 		Double discount = agent.readProperty("discount-factor", Double.class,
 				0.95);
 
-		this.random = new Random();
-		this.pPickup = discount;
+
 		this.numActions = 0;
 		this.myAgent = agent;
 		Vehicle myVehicle = agent.vehicles().get(0);
 
 		this.numberCities = topology.size();
 
-		double [ ] [ ] prices = new double [ numberCities ] [ numberCities ];
 
-		for (City origin:topology)
-		{
-			for (City destination:topology)
-			{
-				if (origin==destination){
-					prices[origin.id][destination.id] = 0;
-				} else {
-					prices[origin.id][destination.id] = compute_cost(origin,destination);
-				}
-			}
-		}
-
-
-		double [ ] [ ] Q = new double [ numberCities ] [ numberCities  + 1];
+		double [ ] [ ] Q = new double [ numberCities ] [ numberCities  + 1]; // The last one for the task, the firsts for the simple moves
 		for (int i = 0; i<numberCities; i++){
 			for (int j = 0; j<= numberCities; j++){
 				Q[i][j] = 0;
@@ -83,48 +63,37 @@ public class ReactiveTemplate implements ReactiveBehavior {
 		for (int i = 0; i< numberCities;i++) V[i] = 0;
 
 		this.bestNeighbor = new City [numberCities];
-		this.idBestNeighbor = new int [numberCities];
 
 		this.maxNeighbor = new double [numberCities];
-		for (int i = 0; i< numberCities;i++) maxNeighbor[i] = 0;
 
 		double [] previous_V;
-		double last_difference = 100;
-		double current_difference = 0;
 
-		int test = 1;
-		//while (Math.abs(last_difference-current_difference)0.001){
-		while (test<10000000){
-			test++;
-			//System.out.println("On passe");
-			previous_V = Arrays.copyOf(V,numberCities);
+
+		do{
+
+			previous_V = V;
+			V = new double [numberCities];
+
 
 			for(City origin:topology){
 				// Let us see what happens when we take the task we see
-				double maximum = -8486454;
+				double maximum;
 				double averageRewardFromHere = 0;
 				for (City destination:topology){
-					if (origin != destination){
-						averageRewardFromHere += td.probability(origin,destination)*
-								(td.reward(origin,destination)-origin.distanceTo(destination)*myVehicle.costPerKm()) +
-								discount*previous_V[destination.id];
-
-					}
+					if (origin != destination) averageRewardFromHere += td.probability(origin, destination) *
+							(td.reward(origin, destination) - (origin.distanceTo(destination) * myVehicle.costPerKm()) +
+									(discount * previous_V[destination.id]));
 
 				}
-				// We store it in the last column of our city row in Q
-
-				double max_neighbor = -8486454;
-				City best_neighbor = origin;
-				int idBest = 0;
-
-
+				// We store it in the last column of our city row in Q this average of a task reward
 				Q[origin.id][numberCities] = averageRewardFromHere;
-				if (averageRewardFromHere > maximum){
-					maximum = averageRewardFromHere;
-				}
+				// And suppose it is more valuable to take the task
+				maximum = averageRewardFromHere;
+
 
 				// Otherwise we just go to a neighbour
+				double max_neighbor = -Double.MAX_VALUE;
+				City best_neighbor = origin;
 
 				for (City neighbor : origin){
 					double rewardForThisNeighbor = (discount * previous_V[neighbor.id]) - origin.distanceTo(neighbor)*myVehicle.costPerKm();
@@ -135,31 +104,23 @@ public class ReactiveTemplate implements ReactiveBehavior {
 					if (rewardForThisNeighbor > max_neighbor){
 						max_neighbor = rewardForThisNeighbor;
 						best_neighbor = neighbor;
-						idBest = neighbor.id;
+
 					}
 				}
 
 				V[origin.id] = maximum;
 				maxNeighbor[origin.id] = max_neighbor;
 				bestNeighbor[origin.id] = best_neighbor;
-				idBestNeighbor[origin.id] = idBest;
 
 
 
 			}
 
 
-			last_difference = current_difference;
-			current_difference = 0;
-			for (int i = 0; i>numberCities; i++){
-				current_difference += Math.abs(previous_V[i]-V[i]);
-			}
 
-		}
 
-		for (int i=0; i<numberCities;i++){
-			System.out.println(idBestNeighbor[i]);
-		}
+		} while(d(V,previous_V)>0.0000000000001);
+
 
 
 
@@ -173,11 +134,14 @@ public class ReactiveTemplate implements ReactiveBehavior {
 		City currentCity = vehicle.getCurrentCity();
 
 		// Currently everything is random but this is where we must use our strategy, when do we chose to pick up a task and where do we go if we do not
-		if ((availableTask == null) || ((availableTask.reward - (currentCity.distanceTo(availableTask.deliveryCity) * vehicle.costPerKm())) > maxNeighbor[currentCity.id]))  { // Or the task is not enough attractive
+		if ((availableTask == null) ||
+				(availableTask.weight>vehicle.capacity()) ||
+				((availableTask.reward - (currentCity.distanceTo(availableTask.deliveryCity) * vehicle.costPerKm())) > maxNeighbor[currentCity.id]))  { // Or the task is not enough attractive compared to its best neighbour
 
-			// Chose the best neighbor
+			// Then chose the best neighbor
 			action = new Move(bestNeighbor[currentCity.id]);
 		} else {
+			// Otherwise we pick up the task
 			action = new Pickup(availableTask);
 		}
 
@@ -188,22 +152,5 @@ public class ReactiveTemplate implements ReactiveBehavior {
 
 		return action;
 	}
-/*	@Override
-	public Action act(Vehicle vehicle, Task availableTask) {
-		Action action;
-		// Currently everything is random but this is where we must use our strategy, when do we chose to pick up a task and where do we go if we do not
-		if (availableTask == null || random.nextDouble() > pPickup) {
-			City currentCity = vehicle.getCurrentCity();
-			action = new Move(currentCity.randomNeighbor(random));
-		} else {
-			action = new Pickup(availableTask);
-		}
-		
-		if (numActions >= 1) {
-			System.out.println("The total profit after "+numActions+" actions is "+myAgent.getTotalProfit()+" (average profit: "+(myAgent.getTotalProfit() / (double)numActions)+")");
-		}
-		numActions++;
-		
-		return action;
-	}*/
+
 }
